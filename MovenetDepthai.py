@@ -9,32 +9,45 @@ import time
 from math import gcd
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-MOVENET_LIGHTNING_MODEL = SCRIPT_DIR / "models/movenet_singlepose_lightning_U8_transpose.blob"
-MOVENET_THUNDER_MODEL = SCRIPT_DIR / "models/movenet_singlepose_thunder_U8_transpose.blob"
+MOVENET_LIGHTNING_MODEL = (
+    SCRIPT_DIR / "models/movenet_singlepose_lightning_U8_transpose.blob"
+)
+MOVENET_THUNDER_MODEL = (
+    SCRIPT_DIR / "models/movenet_singlepose_thunder_U8_transpose.blob"
+)
 
 # Dictionary that maps from joint names to keypoint indices.
 KEYPOINT_DICT = {
-    'nose': 0,
-    'left_eye': 1,
-    'right_eye': 2,
-    'left_ear': 3,
-    'right_ear': 4,
-    'left_shoulder': 5,
-    'right_shoulder': 6,
-    'left_elbow': 7,
-    'right_elbow': 8,
-    'left_wrist': 9,
-    'right_wrist': 10,
-    'left_hip': 11,
-    'right_hip': 12,
-    'left_knee': 13,
-    'right_knee': 14,
-    'left_ankle': 15,
-    'right_ankle': 16
+    "nose": 0,
+    "left_eye": 1,
+    "right_eye": 2,
+    "left_ear": 3,
+    "right_ear": 4,
+    "left_shoulder": 5,
+    "right_shoulder": 6,
+    "left_elbow": 7,
+    "right_elbow": 8,
+    "left_wrist": 9,
+    "right_wrist": 10,
+    "left_hip": 11,
+    "right_hip": 12,
+    "left_knee": 13,
+    "right_knee": 14,
+    "left_ankle": 15,
+    "right_ankle": 16,
 }
 
+
 class Body:
-    def __init__(self, scores=None, keypoints_norm=None, keypoints=None, score_thresh=None, crop_region=None, next_crop_region=None):
+    def __init__(
+        self,
+        scores=None,
+        keypoints_norm=None,
+        keypoints=None,
+        score_thresh=None,
+        crop_region=None,
+        next_crop_region=None,
+    ):
         """
         Attributes:
         scores : scores of the keypoints
@@ -44,8 +57,8 @@ class Body:
         crop_region : cropped region on which the current body was inferred
         next_crop_region : cropping region calculated from the current body keypoints and that will be used on next frame
         """
-        self.scores = scores 
-        self.keypoints_norm = keypoints_norm 
+        self.scores = scores
+        self.keypoints_norm = keypoints_norm
         self.keypoints = keypoints
         self.score_thresh = score_thresh
         self.crop_region = crop_region
@@ -53,9 +66,13 @@ class Body:
 
     def print(self):
         attrs = vars(self)
-        print('\n'.join("%s: %s" % item for item in attrs.items()))
+        print("\n".join("%s: %s" % item for item in attrs.items()))
 
-CropRegion = namedtuple('CropRegion',['xmin', 'ymin', 'xmax',  'ymax', 'size']) # All values are in pixel. The region is a square of size 'size' pixels
+
+CropRegion = namedtuple(
+    "CropRegion", ["xmin", "ymin", "xmax", "ymax", "size"]
+)  # All values are in pixel. The region is a square of size 'size' pixels
+
 
 def find_isp_scale_params(size, is_height=True):
     """
@@ -67,23 +84,23 @@ def find_isp_scale_params(size, is_height=True):
     # We want size >= 288
     if size < 288:
         size = 288
-    
+
     # We are looking for the list on integers that are divisible by 16 and
     # that can be written like n/d where n <= 16 and d <= 63
     if is_height:
-        reference = 1080 
+        reference = 1080
         other = 1920
     else:
-        reference = 1920 
+        reference = 1920
         other = 1080
     size_candidates = {}
-    for s in range(288,reference,16):
+    for s in range(288, reference, 16):
         f = gcd(reference, s)
-        n = s//f
-        d = reference//f
+        n = s // f
+        d = reference // f
         if n <= 16 and d <= 63 and int(round(other * n / d) % 2 == 0):
             size_candidates[s] = (n, d)
-            
+
     # What is the candidate size closer to 'size' ?
     min_dist = -1
     for s in size_candidates:
@@ -92,18 +109,18 @@ def find_isp_scale_params(size, is_height=True):
             min_dist = dist
             candidate = s
         else:
-            if dist > min_dist: break
+            if dist > min_dist:
+                break
             candidate = s
             min_dist = dist
     return candidate, size_candidates[candidate]
 
-    
 
 class MovenetDepthai:
     """
     Movenet body pose detector
     Arguments:
-    - input_src: frame source, 
+    - input_src: frame source,
                     - "rgb" or None: OAK* internal color camera,
                     - "rgb_laconic": same as "rgb" but without sending the frames to the host,
                     - a file path of an image or a video,
@@ -111,27 +128,29 @@ class MovenetDepthai:
     - model: Movenet blob file,
                     - "thunder": the default thunder blob file (see variable MOVENET_THUNDER_MODEL),
                     - "lightning": the default lightning blob file (see variable MOVENET_LIGHTNING_MODEL),
-                    - a path of a blob file. It is important that the filename contains 
+                    - a path of a blob file. It is important that the filename contains
                     the string "thunder" or "lightning" to identify the tyoe of the model.
     - score_thresh : confidence score to determine whether a keypoint prediction is reliable (a float between 0 and 1).
     - crop : boolean which indicates if square cropping is done or not
     - internal_fps : when using the internal color camera as input source, set its FPS to this value (calling setFps()).
     - internal_frame_height : when using the internal color camera, set the frame height (calling setIspScale()).
                                 The width is calculated accordingly to height and depends on value of 'crop'
-    - stats : True or False, when True, display the global FPS when exiting.            
+    - stats : True or False, when True, display the global FPS when exiting.
     """
-    def __init__(self, input_src="rgb",
-                model=None, 
-                score_thresh=0.2,
-                crop=False,
-                internal_fps=None,
-                internal_frame_height=640,
-                stats=True):
-        
 
-        self.model = model 
-        
-        
+    def __init__(
+        self,
+        input_src="rgb",
+        model=None,
+        score_thresh=0.2,
+        crop=False,
+        internal_fps=None,
+        internal_frame_height=640,
+        stats=True,
+    ):
+
+        self.model = model
+
         if model == "lightning":
             self.model = str(MOVENET_LIGHTNING_MODEL)
             self.pd_input_length = 192
@@ -142,20 +161,22 @@ class MovenetDepthai:
             self.model = model
             if "lightning" in str(model):
                 self.pd_input_length = 192
-            else: # Thunder
+            else:  # Thunder
                 self.pd_input_length = 256
         print(f"Using blob file : {self.model}")
 
         print(f"MoveNet imput size : {self.pd_input_length}x{self.pd_input_length}x3")
-        self.score_thresh = score_thresh   
-        
+        self.score_thresh = score_thresh
+
         self.crop = crop
         self.internal_fps = internal_fps
         self.stats = stats
-        
+
         if input_src is None or input_src == "rgb" or input_src == "rgb_laconic":
-            self.input_type = "rgb" # OAK* internal color camera
-            self.laconic = "laconic" in input_src # Camera frames are not sent to the host
+            self.input_type = "rgb"  # OAK* internal color camera
+            self.laconic = (
+                "laconic" in input_src
+            )  # Camera frames are not sent to the host
             if internal_fps is None:
                 if "thunder" in str(model):
                     self.internal_fps = 12
@@ -165,20 +186,24 @@ class MovenetDepthai:
                 self.internal_fps = internal_fps
             print(f"Internal camera FPS set to: {self.internal_fps}")
 
-            self.video_fps = internal_fps # Used when saving the output in a video file. Should be close to the real fps
-            
+            self.video_fps = internal_fps  # Used when saving the output in a video file. Should be close to the real fps
+
             if self.crop:
-                self.frame_size, self.scale_nd = find_isp_scale_params(internal_frame_height)
+                self.frame_size, self.scale_nd = find_isp_scale_params(
+                    internal_frame_height
+                )
                 self.img_h = self.img_w = self.frame_size
             else:
-                width, self.scale_nd = find_isp_scale_params(internal_frame_height * 1920 / 1080, is_height=False)
+                width, self.scale_nd = find_isp_scale_params(
+                    internal_frame_height * 1920 / 1080, is_height=False
+                )
                 self.img_h = int(round(1080 * self.scale_nd[0] / self.scale_nd[1]))
                 self.img_w = int(round(1920 * self.scale_nd[0] / self.scale_nd[1]))
                 self.frame_size = self.img_w
             print(f"Internal camera image size: {self.img_w} x {self.img_h}")
 
-        elif input_src.endswith('.jpg') or input_src.endswith('.png'):
-            self.input_type= "image"
+        elif input_src.endswith(".jpg") or input_src.endswith(".png"):
+            self.input_type = "image"
             self.img = cv2.imread(input_src)
             self.video_fps = 25
             self.img_h, self.img_w = self.img.shape[:2]
@@ -193,28 +218,38 @@ class MovenetDepthai:
             self.img_h = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
             print("Video FPS:", self.video_fps)
 
-        # Defines the default crop region (pads the full image from both sides to make it a square image) 
+        # Defines the default crop region (pads the full image from both sides to make it a square image)
         # Used when the algorithm cannot reliably determine the crop region from the previous frame.
         box_size = max(self.img_w, self.img_h)
         x_min = (self.img_w - box_size) // 2
         y_min = (self.img_h - box_size) // 2
-        self.init_crop_region = CropRegion(x_min, y_min, x_min+box_size, y_min+box_size, box_size)
+        self.init_crop_region = CropRegion(
+            x_min, y_min, x_min + box_size, y_min + box_size, box_size
+        )
         self.crop_region = self.init_crop_region
-        
 
         self.device = dai.Device(self.create_pipeline())
         # self.device.startPipeline()
         print("Pipeline started")
 
-        # Define data queues 
+        # Define data queues
         if self.input_type == "rgb":
             if not self.laconic:
-                self.q_video = self.device.getOutputQueue(name="cam_out", maxSize=1, blocking=False)
+                self.q_video = self.device.getOutputQueue(
+                    name="cam_out", maxSize=1, blocking=False
+                )
             self.q_manip_cfg = self.device.getInputQueue(name="manip_cfg")
         else:
             self.q_pd_in = self.device.getInputQueue(name="pd_in")
-        self.q_pd_out = self.device.getOutputQueue(name="pd_out", maxSize=4, blocking=False)
-            
+        self.q_pd_out = self.device.getOutputQueue(
+            name="pd_out", maxSize=4, blocking=False
+        )
+
+        self.q_ac_in = self.device.getInputQueue(name="ac_in")
+        self.q_ac_out = self.device.getOutputQueue(
+            name="ac_out", maxSize=4, blocking=False
+        )
+
         self.fps = FPS()
 
         self.nb_frames = 0
@@ -229,7 +264,7 @@ class MovenetDepthai:
         if self.input_type == "rgb":
             # ColorCamera
             print("Creating Color Camera...")
-            # cam = pipeline.create(dai.node.ColorCamera) 
+            # cam = pipeline.create(dai.node.ColorCamera)
             cam = pipeline.createColorCamera()
             cam.setResolution(dai.ColorCameraProperties.SensorResolution.THE_1080_P)
             cam.setInterleaved(False)
@@ -240,7 +275,7 @@ class MovenetDepthai:
             if self.crop:
                 cam.setVideoSize(self.frame_size, self.frame_size)
                 cam.setPreviewSize(self.frame_size, self.frame_size)
-            else: 
+            else:
                 cam.setVideoSize(self.img_w, self.img_h)
                 cam.setPreviewSize(self.img_w, self.img_h)
 
@@ -252,10 +287,10 @@ class MovenetDepthai:
 
             # ImageManip for cropping
             manip = pipeline.createImageManip()
-            manip.setMaxOutputFrameSize(self.pd_input_length*self.pd_input_length*3)
+            manip.setMaxOutputFrameSize(self.pd_input_length * self.pd_input_length * 3)
             manip.setWaitForConfigInput(True)
             manip.inputImage.setQueueSize(1)
-            manip.inputImage.setBlocking(False)            
+            manip.inputImage.setBlocking(False)
 
             manip_cfg = pipeline.createXLinkIn()
             manip_cfg.setStreamName("manip_cfg")
@@ -278,31 +313,61 @@ class MovenetDepthai:
             pd_in.setStreamName("pd_in")
             pd_in.out.link(pd_nn.input)
 
-        # Define link to send pd result to host 
+        # Define link to send pd result to host
         pd_out = pipeline.createXLinkOut()
         # pd_out = pipeline.create(dai.node.XLinkOut)
         pd_out.setStreamName("pd_out")
 
         pd_nn.out.link(pd_out.input)
 
+        # Define action detection model
+        print("Creating Action Detection Neural Network...")
+        ac_nn = pipeline.createNeuralNetwork()
+        ac_nn.setBlobPath(
+            str(Path("models/action_openvino_2021.3_6shave.blob").resolve().absolute())
+        )
+        ac_in = pipeline.createXLinkIn()
+        ac_in.setStreamName("ac_in")
+        ac_in.out.link(ac_nn.input)
+
+        # Define link to send pd result to host
+        ac_out = pipeline.createXLinkOut()
+        ac_out.setStreamName("ac_out")
+
+        ac_nn.out.link(ac_out.input)
+
         print("Pipeline created.")
 
-        return pipeline        
-    
+        return pipeline
+
     def crop_and_resize(self, frame, crop_region):
         """Crops and resize the image to prepare for the model input."""
-        cropped = frame[max(0,crop_region.ymin):min(self.img_h,crop_region.ymax), max(0,crop_region.xmin):min(self.img_w,crop_region.xmax)]
-        
-        if crop_region.xmin < 0 or crop_region.xmax >= self.img_w or crop_region.ymin < 0 or crop_region.ymax >= self.img_h:
-            # Padding is necessary        
-            cropped = cv2.copyMakeBorder(cropped, 
-                                        max(0,-crop_region.ymin), 
-                                        max(0, crop_region.ymax-self.img_h),
-                                        max(0,-crop_region.xmin), 
-                                        max(0, crop_region.xmax-self.img_w),
-                                        cv2.BORDER_CONSTANT)
+        cropped = frame[
+            max(0, crop_region.ymin) : min(self.img_h, crop_region.ymax),
+            max(0, crop_region.xmin) : min(self.img_w, crop_region.xmax),
+        ]
 
-        cropped = cv2.resize(cropped, (self.pd_input_length, self.pd_input_length), interpolation=cv2.INTER_AREA)
+        if (
+            crop_region.xmin < 0
+            or crop_region.xmax >= self.img_w
+            or crop_region.ymin < 0
+            or crop_region.ymax >= self.img_h
+        ):
+            # Padding is necessary
+            cropped = cv2.copyMakeBorder(
+                cropped,
+                max(0, -crop_region.ymin),
+                max(0, crop_region.ymax - self.img_h),
+                max(0, -crop_region.xmin),
+                max(0, crop_region.xmax - self.img_w),
+                cv2.BORDER_CONSTANT,
+            )
+
+        cropped = cv2.resize(
+            cropped,
+            (self.pd_input_length, self.pd_input_length),
+            interpolation=cv2.INTER_AREA,
+        )
         return cropped
 
     def torso_visible(self, scores):
@@ -311,10 +376,13 @@ class MovenetDepthai:
         This function checks whether the model is confident at predicting one of the
         shoulders/hips which is required to determine a good crop region.
         """
-        return ((scores[KEYPOINT_DICT['left_hip']] > self.score_thresh or
-                scores[KEYPOINT_DICT['right_hip']] > self.score_thresh) and
-                (scores[KEYPOINT_DICT['left_shoulder']] > self.score_thresh or
-                scores[KEYPOINT_DICT['right_shoulder']] > self.score_thresh))
+        return (
+            scores[KEYPOINT_DICT["left_hip"]] > self.score_thresh
+            or scores[KEYPOINT_DICT["right_hip"]] > self.score_thresh
+        ) and (
+            scores[KEYPOINT_DICT["left_shoulder"]] > self.score_thresh
+            or scores[KEYPOINT_DICT["right_shoulder"]] > self.score_thresh
+        )
 
     def determine_torso_and_body_range(self, keypoints, scores, center_x, center_y):
         """Calculates the maximum distance from each keypoints to the center location.
@@ -323,7 +391,7 @@ class MovenetDepthai:
         full 17 keypoints and 4 torso keypoints. The returned information will be
         used to determine the crop size. See determine_crop_region for more detail.
         """
-        torso_joints = ['left_shoulder', 'right_shoulder', 'left_hip', 'right_hip']
+        torso_joints = ["left_shoulder", "right_shoulder", "left_hip", "right_hip"]
         max_torso_yrange = 0.0
         max_torso_xrange = 0.0
         for joint in torso_joints:
@@ -359,11 +427,33 @@ class MovenetDepthai:
         function returns a default crop which is the full image padded to square.
         """
         if self.torso_visible(body.scores):
-            center_x = (body.keypoints[KEYPOINT_DICT['left_hip']][0] + body.keypoints[KEYPOINT_DICT['right_hip']][0]) // 2
-            center_y = (body.keypoints[KEYPOINT_DICT['left_hip']][1] + body.keypoints[KEYPOINT_DICT['right_hip']][1]) // 2
-            max_torso_yrange, max_torso_xrange, max_body_yrange, max_body_xrange = self.determine_torso_and_body_range(body.keypoints, body.scores, center_x, center_y)
-            crop_length_half = np.amax([max_torso_xrange * 1.9, max_torso_yrange * 1.9, max_body_yrange * 1.2, max_body_xrange * 1.2])
-            tmp = np.array([center_x, self.img_w - center_x, center_y, self.img_h - center_y])
+            center_x = (
+                body.keypoints[KEYPOINT_DICT["left_hip"]][0]
+                + body.keypoints[KEYPOINT_DICT["right_hip"]][0]
+            ) // 2
+            center_y = (
+                body.keypoints[KEYPOINT_DICT["left_hip"]][1]
+                + body.keypoints[KEYPOINT_DICT["right_hip"]][1]
+            ) // 2
+            (
+                max_torso_yrange,
+                max_torso_xrange,
+                max_body_yrange,
+                max_body_xrange,
+            ) = self.determine_torso_and_body_range(
+                body.keypoints, body.scores, center_x, center_y
+            )
+            crop_length_half = np.amax(
+                [
+                    max_torso_xrange * 1.9,
+                    max_torso_yrange * 1.9,
+                    max_body_yrange * 1.2,
+                    max_body_xrange * 1.2,
+                ]
+            )
+            tmp = np.array(
+                [center_x, self.img_w - center_x, center_y, self.img_h - center_y]
+            )
             crop_length_half = int(round(np.amin([crop_length_half, np.amax(tmp)])))
             crop_corner = [center_x - crop_length_half, center_y - crop_length_half]
 
@@ -371,15 +461,28 @@ class MovenetDepthai:
                 return self.init_crop_region
             else:
                 crop_length = crop_length_half * 2
-                return CropRegion(crop_corner[0], crop_corner[1], crop_corner[0]+crop_length, crop_corner[1]+crop_length,crop_length)
+                return CropRegion(
+                    crop_corner[0],
+                    crop_corner[1],
+                    crop_corner[0] + crop_length,
+                    crop_corner[1] + crop_length,
+                    crop_length,
+                )
         else:
             return self.init_crop_region
 
     def pd_postprocess(self, inference):
-        
-        kps = np.array(inference.getLayerFp16('Identity')).reshape(-1,3) # 17x3
-        body = Body(scores=kps[:,2], keypoints_norm=kps[:,[1,0]], score_thresh=self.score_thresh)
-        body.keypoints = (np.array([self.crop_region.xmin, self.crop_region.ymin]) + body.keypoints_norm * self.crop_region.size).astype(np.int)
+
+        kps = np.array(inference.getLayerFp16("Identity")).reshape(-1, 3)  # 17x3
+        body = Body(
+            scores=kps[:, 2],
+            keypoints_norm=kps[:, [1, 0]],
+            score_thresh=self.score_thresh,
+        )
+        body.keypoints = (
+            np.array([self.crop_region.xmin, self.crop_region.ymin])
+            + body.keypoints_norm * self.crop_region.size
+        ).astype(np.int)
         body.crop_region = self.crop_region
         body.next_crop_region = self.determine_crop_region(body)
         return body
@@ -392,9 +495,10 @@ class MovenetDepthai:
             cfg = dai.ImageManipConfig()
             points = [
                 [self.crop_region.xmin, self.crop_region.ymin],
-                [self.crop_region.xmax-1, self.crop_region.ymin],
-                [self.crop_region.xmax-1, self.crop_region.ymax-1],
-                [self.crop_region.xmin, self.crop_region.ymax-1]]
+                [self.crop_region.xmax - 1, self.crop_region.ymin],
+                [self.crop_region.xmax - 1, self.crop_region.ymax - 1],
+                [self.crop_region.xmin, self.crop_region.ymax - 1],
+            ]
             point2fList = []
             for p in points:
                 pt = dai.Point2f()
@@ -418,11 +522,11 @@ class MovenetDepthai:
                 ok, frame = self.cap.read()
                 if not ok:
                     return None, None
-                
+
             # Cropping of the video frame
             cropped = self.crop_and_resize(frame, self.crop_region)
-            cropped = cv2.cvtColor(cropped, cv2.COLOR_BGR2RGB).transpose(2,0,1)
-            
+            cropped = cv2.cvtColor(cropped, cv2.COLOR_BGR2RGB).transpose(2, 0, 1)
+
             frame_nn = dai.ImgFrame()
             frame_nn.setTimestamp(time.monotonic())
             frame_nn.setWidth(self.pd_input_length)
@@ -440,12 +544,11 @@ class MovenetDepthai:
             self.nb_frames += 1
             self.nb_pd_inferences += 1
 
-
         return frame, body
-
 
     def exit(self):
         # Print some stats
         if self.stats:
-            print(f"FPS : {self.fps.global_duration():.1f} f/s (# frames = {self.fps.nb_frames()})")
-           
+            print(
+                f"FPS : {self.fps.global_duration():.1f} f/s (# frames = {self.fps.nb_frames()})"
+            )
